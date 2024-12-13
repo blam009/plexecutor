@@ -1,0 +1,4 @@
+config/
+movies/
+tv/
+docker-compose.yml

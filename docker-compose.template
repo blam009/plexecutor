@@ -1,0 +1,10 @@
+services:
+  plexecutor:
+    container_name: plexecutor
+    image: linuxserver/plex:latest
+    network_mode: host
+    environment:
+      - VERSION=docker
+    volumes: []
+    devices: []
+    restart: unless-stopped
