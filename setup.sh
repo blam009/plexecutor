@@ -59,14 +59,8 @@ while true; do
     esac
 done
 
-echo "Cleaning up existing installation (if any)..."
-
 DOCKER_COMPOSE_TMP=docker-compose.template
 DOCKER_COMPOSE_YML=docker-compose.yml
-rm -rf "$DOCKER_COMPOSE_YML"
-docker compose down 2>/dev/null
-yq '.services.*.container_name' "$DOCKER_COMPOSE_TMP" | xargs docker rm -f
-
 SYSTEMD=/etc/systemd/system
 SERVICE="plexecutor.service"
 SERVICE_PATH="$SYSTEMD/$SERVICE"
@@ -88,7 +82,7 @@ cp "$DOCKER_COMPOSE_TMP" "$DOCKER_COMPOSE_YML"
 # Enable hardware accelerated decoding if available
 DRI_DIR=/dev/dri
 if [[ -d "$DRI_DIR" ]]; then
-    echo "Disabling accelerated video decoding, opencl, etc..."
+    echo "Enabling accelerated video decoding, opencl, etc..."
     yq \
         ".services.plexecutor.devices += \"$DRI_DIR:$DRI_DIR\"" \
     -i "$DOCKER_COMPOSE_YML"
@@ -138,22 +132,33 @@ if [[ "$NETWORK" == "novpn-docker" ]]; then
         .networks.$NETWORK.external = true | \
         .networks.$NETWORK.name = \"$NETWORK\" \
     " -i "$DOCKER_COMPOSE_YML"
-elif [[ "$NETWORK" != "host" ]]; then
+    echo "Installing $SERVICE..."
+    sed " \
+        s|{{PWD}}|$PWD|g; \
+        s|{{NOVPN_RUNTIME_ENV}}|/var/run/novpn/env|g; \
+    " "$SERVICE" | sudo sponge "$SERVICE_PATH"
+elif [[ "$NETWORK" == "host" ]]; then
+    echo "Installing $SERVICE..."
+    sed " \
+        s|{{PWD}}|$PWD|g; \
+        /NOVPN/d; \
+        \$a\\\n[Install]\\nWantedBy=multi-user.target \
+    " "$SERVICE" | sudo sponge "$SERVICE_PATH"
+else
     echo "Error: Invalid network: $NETWORK"
     help
     exit 1
 fi
 
-# Docker pull
 echo "Downloading docker image(s)..."
-docker compose pull 2>/dev/null
+docker compose pull
 
-echo "Installing $SERVICE..."
-if [[ "$NETWORK" == "novpn-docker" ]]; then
-    sed "s|{{PWD}}|$PWD|g;s|{{NOVPN_RUNTIME_ENV}}|/var/run/novpn/env|g" "$SERVICE" | sudo sponge "$SERVICE_PATH"
-else
-    sed "s|{{PWD}}|$PWD|g;/NOVPN/d" "$SERVICE" | sudo sponge "$SERVICE_PATH"
-fi
+echo "Reloading systemd daemon..."
 sudo systemctl daemon-reload
+
+if grep -q '\[Install\]' "$SERVICE_PATH"; then
+    echo "Enabling $SERVICE..."
+    sudo systemctl enable "$SERVICE" >/dev/null 2>&1
+fi
 
 echo "...Done!"
